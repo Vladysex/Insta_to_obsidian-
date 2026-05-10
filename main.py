@@ -4,7 +4,7 @@ import time
 import random
 import requests
 import yt_dlp
-import google.generativeai as genai
+from google import genai
 from instagrapi import Client
 from dotenv import load_dotenv
 
@@ -20,11 +20,11 @@ OUTPUT_JSON = 'categorized_reels.json'
 TEMP_DIR = './temp_media'
 
 if not all([IG_USERNAME, IG_PASSWORD, GEMINI_API_KEY]):
-    print("Помилка: Не всі дані завантажено з .env файлу!")
+    print("Помилка: Не всі дані завантажено з .env файлу! Перевір наявність файлу та назви змінних.")
     exit()
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Нова ініціалізація клієнта Gemini
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 os.makedirs(TEMP_DIR, exist_ok=True)
 
@@ -64,13 +64,18 @@ def analyze_level_1_thumbnail(caption, thumbnail_path):
     {{"category": "Your category", "reason": "Short explanation"}}
     """
     try:
-        image_part = genai.upload_file(thumbnail_path)
-        response = model.generate_content([prompt, image_part])
-        image_part.delete()
+        # Новий синтаксис завантаження та генерації
+        image_part = client.files.upload(file=thumbnail_path)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=[prompt, image_part]
+        )
+        client.files.delete(name=image_part.name)
 
         result_text = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(result_text)
-    except Exception:
+    except Exception as e:
+        print(f"Помилка ШІ на Рівні 1: {e}")
         return {"category": "Unknown", "reason": "AI Error"}
 
 
@@ -83,20 +88,34 @@ def analyze_level_2_audio(audio_path):
     {"category": "Talking Head", "summary": "They are talking about..."}
     """
     try:
-        audio_part = genai.upload_file(audio_path)
-        response = model.generate_content([prompt, audio_part])
-        audio_part.delete()
+        audio_part = client.files.upload(file=audio_path)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=[prompt, audio_part]
+        )
+        client.files.delete(name=audio_part.name)
 
         result_text = response.text.replace('```json', '').replace('```', '').strip()
         return json.loads(result_text)
-    except Exception:
+    except Exception as e:
+        print(f"Помилка ШІ на Рівні 2: {e}")
         return {"category": "Audio Error", "summary": ""}
 
 
 def process_reels():
     cl = Client()
+    session_file = "ig_sessions.json"
+
     try:
-        cl.login(IG_USERNAME, IG_PASSWORD)
+        if os.path.exists(session_file):
+            print("Loading saved session")
+            cl.load_settings(session_file)
+            cl.login(IG_USERNAME, IG_PASSWORD)
+        else:
+            print("Session authorising...")
+            cl.login(IG_USERNAME, IG_PASSWORD)
+            cl.dump_settings(session_file)
+            print("Session saved!")
     except Exception as e:
         print(f"Помилка входу: {e}")
         return
@@ -137,7 +156,7 @@ def process_reels():
             item_data['ai_reason'] = level_1_result.get('reason')
             item_data['author'] = author
 
-            if category in ["Невідомо", "Розмовне"] and "instagram.com/reel/" in str(identifier):
+            if category in ["Unknown", "Talking Head"] and "instagram.com/reel/" in str(identifier):
                 audio_path = os.path.join(TEMP_DIR, f"audio_{media_info.pk}.mp3")
 
                 ydl_opts = {
