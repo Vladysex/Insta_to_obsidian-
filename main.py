@@ -13,17 +13,17 @@ load_dotenv()
 IG_USERNAME = os.getenv('IG_USERNAME')
 IG_PASSWORD = os.getenv('IG_PASSWORD')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-TARGET_USER = 'self'
+TARGET_USER = os.getenv('TARGET_USER')
 
 INPUT_JSON = 'messages_with_self.json'
 OUTPUT_JSON = 'categorized_reels.json'
 TEMP_DIR = './temp_media'
+SESSION_FILE = 'session.json'
 
 if not all([IG_USERNAME, IG_PASSWORD, GEMINI_API_KEY]):
     print("Помилка: Не всі дані завантажено з .env файлу! Перевір наявність файлу та назви змінних.")
     exit()
 
-# Нова ініціалізація клієнта Gemini
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -64,7 +64,6 @@ def analyze_level_1_thumbnail(caption, thumbnail_path):
     {{"category": "Your category", "reason": "Short explanation"}}
     """
     try:
-        # Новий синтаксис завантаження та генерації
         image_part = client.files.upload(file=thumbnail_path)
         response = client.models.generate_content(
             model='gemini-1.5-flash',
@@ -102,22 +101,33 @@ def analyze_level_2_audio(audio_path):
         return {"category": "Audio Error", "summary": ""}
 
 
-def process_reels():
-    cl = Client()
-    session_file = "ig_sessions.json"
+def login_instagram(cl: Client) -> bool:
+    try:
+        if os.path.exists(SESSION_FILE):
+            cl.load_settings(SESSION_FILE)
+            me = cl.account_info()
+            print("Успішний вхід із session.json! Профіль:", me.username)
+            return True
+    except Exception as e:
+        print(f"Не вдалось зайти через session.json: {e}")
 
     try:
-        if os.path.exists(session_file):
-            print("Loading saved session")
-            cl.load_settings(session_file)
-            cl.login(IG_USERNAME, IG_PASSWORD)
-        else:
-            print("Session authorising...")
-            cl.login(IG_USERNAME, IG_PASSWORD)
-            cl.dump_settings(session_file)
-            print("Session saved!")
+        print("Авторизація через логін/пароль...")
+        cl.login(IG_USERNAME, IG_PASSWORD)
+        me = cl.account_info()
+        print("Успішний вхід! Профіль:", me.username)
+        cl.dump_settings(SESSION_FILE)
+        print(f"Session збережено у {SESSION_FILE}")
+        return True
     except Exception as e:
         print(f"Помилка входу: {e}")
+        return False
+
+
+def process_reels():
+    cl = Client()
+
+    if not login_instagram(cl):
         return
 
     with open(INPUT_JSON, 'r', encoding='utf-8') as f:
