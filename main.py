@@ -26,7 +26,7 @@ AI_MAX_RETRIES = int(os.getenv("AI_MAX_RETRIES") or "6")
 
 REQUESTS_TIMEOUT_S = float(os.getenv("REQUESTS_TIMEOUT_S") or "25")
 
-MAX_ITEMS = int(os.getenv("MAX_ITEMS") or "15")  # set 0 to disable limit
+MAX_ITEMS = int(os.getenv("MAX_ITEMS") or "15")
 
 
 if not GEMINI_API_KEY:
@@ -80,10 +80,8 @@ def download_image(url: str, save_path: str | Path) -> None:
 
 
 def extract_retry_delay_seconds(exc: Exception) -> int | None:
-    """Best-effort parsing of Gemini retryDelay from exception string."""
     text = str(exc)
 
-    # Common case includes "'retryDelay': '56s'"
     m = _retry_delay_re.search(text)
     if m:
         try:
@@ -91,7 +89,6 @@ def extract_retry_delay_seconds(exc: Exception) -> int | None:
         except ValueError:
             return None
 
-    # Fallback: any "...retryDelay...56s..."
     m = re.search(r"retryDelay[^\d]*(\d+)s", text)
     if m:
         try:
@@ -251,14 +248,12 @@ def process_reels() -> None:
         if MAX_ITEMS > 0 and processed_this_run >= MAX_ITEMS:
             print(f"Reached MAX_ITEMS={MAX_ITEMS}. Stopping early.")
             break
-        # Prefer normalized fields from fetch_messages.py
         source_key = msg.get("source_key")
         reel_url = msg.get("reel_url") or msg.get("video_url") or msg.get("text", "")
         thumbnail_url = msg.get("thumbnail_url")
         author_username = msg.get("author_username")
         title = msg.get("title")
 
-        # Backward-compatible fallback for older JSONs
         if not thumbnail_url:
             raw_xma = msg.get("raw_xma") or {}
             thumbnail_url = raw_xma.get("preview_url") or raw_xma.get("thumbnail_url")
@@ -315,10 +310,8 @@ def process_reels() -> None:
             item_data["confidence"] = confidence
             item_data["ai_reason"] = level_1_result.get("reason")
 
-            # (опційно) для сумісності/зручності:
             item_data["category"] = topic or fmt or "unknown"
-            # Level 2 only when we have an IG reel URL
-            # Run Level 2 only when it likely contains speech (or we are unsure)
+
             if fmt in ["unknown", "talking_head", "mixed"] and "instagram.com/reel/" in str(reel_url):
                 audio_path = TEMP_DIR / f"audio_{source_key.replace(':', '_').replace('/', '_')}.mp3"
 
@@ -334,8 +327,6 @@ def process_reels() -> None:
                 level_2_result = analyze_level_2_audio(audio_path)
                 safe_unlink(audio_path)
 
-                # Level 2 contract should return JSON like:
-                # {"topic":"...", "intent":"...", "summary":"...", "confidence":0.0, "reason":"..."}
                 item_data["format"] = "talking_head"
                 item_data["topic"] = level_2_result.get("topic", item_data.get("topic"))
                 item_data["intent"] = level_2_result.get("intent", item_data.get("intent"))
@@ -343,7 +334,6 @@ def process_reels() -> None:
                 item_data["confidence_l2"] = level_2_result.get("confidence")
                 item_data["ai_reason_l2"] = level_2_result.get("reason")
 
-            # Optional: keep a single string field for quick filtering/search
             item_data["category"] = item_data.get("topic") or item_data.get("format") or "unknown"
 
             append_jsonl(OUTPUT_JSONL, item_data)
